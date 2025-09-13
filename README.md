@@ -1,43 +1,83 @@
--- JEFIN Menu - Universal (Mobile + Desktop)
--- Mantém o menu igual ao original (apenas adiciona controles touch para FOV / Smooth e botão AIM)
--- Não usa Drawing; usa PlayerGui, BillboardGui, UIStroke
-
---// Serviços
+-- JEFIN Menu — versão robusta (fallbacks, pcall, universal)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local UserInputService = game:GetService("UserInputService")
+local UIS = game:GetService("UserInputService")
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
-local UIS = UserInputService
 
---// Variáveis
+-- segurança: aguardar LocalPlayer/Camera se necessário
+if not LocalPlayer then
+    repeat task.wait() LocalPlayer = Players.LocalPlayer until LocalPlayer
+end
+if not Camera or not Camera.ClassName then
+    repeat task.wait() Camera = workspace.CurrentCamera until Camera and Camera.ClassName
+end
+
+local debugMode = false -- true para prints extras
+
+-- Escolhe o melhor parent de GUI (tenta PlayerGui, depois CoreGui)
+local function chooseGuiParent()
+    local pg = nil
+    pcall(function() pg = LocalPlayer:FindFirstChild("PlayerGui") end)
+    if pg then
+        local ok = pcall(function()
+            local t = Instance.new("Frame")
+            t.Parent = pg
+            t:Destroy()
+        end)
+        if ok then return pg end
+    end
+    local cg = game:GetService("CoreGui")
+    local ok2 = pcall(function()
+        local t = Instance.new("Frame")
+        t.Parent = cg
+        t:Destroy()
+    end)
+    if ok2 then return cg end
+    -- último recurso
+    return LocalPlayer:FindFirstChild("PlayerGui") or game:GetService("CoreGui")
+end
+
+local GuiParent = chooseGuiParent()
+if debugMode then print("GUI parent:", GuiParent and GuiParent:GetFullName()) end
+
+--// Variáveis de estado
 local aimbotActive = false
 local fovActive = false
 local fovRadius = 120
 local espBoxActive = false
 local espHealthActive = false
 local espNameActive = false
-local holdingAimButton = false -- para mobile: botão virtual
-local holdingRightClick = false -- para desktop (mouse right)
+local holdingAimButton = false
+local holdingRightClick = false
 local menuVisible = true
-local smoothness = 0.15 -- valor inicial (pode ser ajustado pelo slider ou botões)
+local smoothness = 0.15
 
---// GUI Menu
--- Parent ao PlayerGui (para máxima compatibilidade)
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+-- Função segura para criar instâncias (evita crash ao setar Parent)
+local function safeParent(instance, parent)
+    local ok, res = pcall(function() instance.Parent = parent return true end)
+    if not ok then
+        -- tenta parent alternativo
+        pcall(function() instance.Parent = chooseGuiParent() end)
+    end
+end
+
+--// GUI (mantendo layout muito parecido com o seu)
+local PlayerGui = GuiParent -- pode ser PlayerGui ou CoreGui dependendo do ambiente
 
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "JefinScreenGui"
-ScreenGui.Parent = PlayerGui
+safeParent(ScreenGui, PlayerGui)
 ScreenGui.ResetOnSpawn = false
 
-local Frame = Instance.new("Frame", ScreenGui)
+local Frame = Instance.new("Frame")
 Frame.Size = UDim2.new(0,240,0,260)
 Frame.Position = UDim2.new(0.5,-120,0.5,-130)
 Frame.BackgroundColor3 = Color3.fromRGB(25,25,25)
 Frame.BorderSizePixel = 0
 Frame.Active = true
 Frame.Draggable = true
+Frame.Parent = ScreenGui
 
 local Title = Instance.new("TextLabel", Frame)
 Title.Size = UDim2.new(1,0,0,25)
@@ -47,7 +87,6 @@ Title.TextSize = 16
 Title.TextColor3 = Color3.fromRGB(255,255,255)
 Title.BackgroundTransparency = 1
 
--- Função rápida para criar botões no mesmo estilo
 local function CreateButton(y, text)
     local btn = Instance.new("TextButton", Frame)
     btn.Size = UDim2.new(0,220,0,25)
@@ -60,7 +99,7 @@ local function CreateButton(y, text)
     return btn
 end
 
--- BOTÕES do menu (mantidos iguais)
+-- botões (mesmo visual)
 local AimbotButton = CreateButton(35,"AIMBOT")
 AimbotButton.MouseButton1Click:Connect(function()
     aimbotActive = not aimbotActive
@@ -71,12 +110,7 @@ local FovButton = CreateButton(65,"FOV")
 FovButton.MouseButton1Click:Connect(function()
     fovActive = not fovActive
     FovButton.BackgroundColor3 = fovActive and Color3.fromRGB(200,0,0) or Color3.fromRGB(0,200,0)
-    -- mostrar/ocultar círculo também
-    if fovActive then
-        ScreenGui:FindFirstChild("FOVCircle").Visible = true
-    else
-        ScreenGui:FindFirstChild("FOVCircle").Visible = false
-    end
+    pcall(function() ScreenGui:FindFirstChild("FOVCircle").Visible = fovActive end)
 end)
 
 local EspBoxButton = CreateButton(95,"ESP BOX")
@@ -97,7 +131,7 @@ EspNomeButton.MouseButton1Click:Connect(function()
     EspNomeButton.BackgroundColor3 = espNameActive and Color3.fromRGB(200,0,0) or Color3.fromRGB(0,200,0)
 end)
 
--- Slider (visual) FOV
+-- Sliders visuais
 local SliderBack = Instance.new("Frame", Frame)
 SliderBack.Name = "SliderBackFOV"
 SliderBack.Size = UDim2.new(0,200,0,6)
@@ -117,7 +151,6 @@ FovValue.TextSize = 14
 FovValue.TextColor3 = Color3.fromRGB(255,255,255)
 FovValue.BackgroundTransparency = 1
 
--- Slider Smooth (visual)
 local SmoothBack = Instance.new("Frame", Frame)
 SmoothBack.Name = "SliderBackSmooth"
 SmoothBack.Size = UDim2.new(0,200,0,6)
@@ -137,135 +170,80 @@ SmoothValue.TextSize = 14
 SmoothValue.TextColor3 = Color3.fromRGB(255,255,255)
 SmoothValue.BackgroundTransparency = 1
 
--- BOTÕES touch para Mobile (próximos aos sliders)
--- FOV - decrease
-local FovDec = Instance.new("TextButton", Frame)
-FovDec.Size = UDim2.new(0,30,0,20)
-FovDec.Position = UDim2.new(0,215,0,198)
-FovDec.Text = "-"
-FovDec.Font = Enum.Font.Gotham
-FovDec.TextSize = 18
-FovDec.TextColor3 = Color3.fromRGB(255,255,255)
-FovDec.BackgroundColor3 = Color3.fromRGB(40,40,40)
-FovDec.MouseButton1Click:Connect(function()
-    fovRadius = math.max(30, fovRadius - 10)
-    FovValue.Text = "FOV: "..fovRadius
-end)
+-- botões + / - para mobile
+local function createSmallBtn(x,y,txt)
+    local b = Instance.new("TextButton", Frame)
+    b.Size = UDim2.new(0,30,0,20)
+    b.Position = UDim2.new(0,x,0,y)
+    b.Text = txt
+    b.Font = Enum.Font.Gotham
+    b.TextSize = 18
+    b.TextColor3 = Color3.fromRGB(255,255,255)
+    b.BackgroundColor3 = Color3.fromRGB(40,40,40)
+    return b
+end
 
--- FOV - increase
-local FovInc = Instance.new("TextButton", Frame)
-FovInc.Size = UDim2.new(0,30,0,20)
-FovInc.Position = UDim2.new(0,215,0,182)
-FovInc.Text = "+"
-FovInc.Font = Enum.Font.Gotham
-FovInc.TextSize = 18
-FovInc.TextColor3 = Color3.fromRGB(255,255,255)
-FovInc.BackgroundColor3 = Color3.fromRGB(40,40,40)
+local FovInc = createSmallBtn(0.89,0.71,"+")
 FovInc.MouseButton1Click:Connect(function()
     fovRadius = math.min(1000, fovRadius + 10)
     FovValue.Text = "FOV: "..fovRadius
 end)
-
--- Smooth - decrease
-local SmoothDec = Instance.new("TextButton", Frame)
-SmoothDec.Size = UDim2.new(0,30,0,20)
-SmoothDec.Position = UDim2.new(0,215,0,233)
-SmoothDec.Text = "-"
-SmoothDec.Font = Enum.Font.Gotham
-SmoothDec.TextSize = 18
-SmoothDec.TextColor3 = Color3.fromRGB(255,255,255)
-SmoothDec.BackgroundColor3 = Color3.fromRGB(40,40,40)
-SmoothDec.MouseButton1Click:Connect(function()
-    smoothness = math.max(0.01, math.floor((smoothness - 0.01) * 100)/100)
-    SmoothValue.Text = "Smooth: "..smoothness
+local FovDec = createSmallBtn(0.89,0.77,"-")
+FovDec.MouseButton1Click:Connect(function()
+    fovRadius = math.max(30, fovRadius - 10)
+    FovValue.Text = "FOV: "..fovRadius
 end)
-
--- Smooth - increase
-local SmoothInc = Instance.new("TextButton", Frame)
-SmoothInc.Size = UDim2.new(0,30,0,20)
-SmoothInc.Position = UDim2.new(0,215,0,217)
-SmoothInc.Text = "+"
-SmoothInc.Font = Enum.Font.Gotham
-SmoothInc.TextSize = 18
-SmoothInc.TextColor3 = Color3.fromRGB(255,255,255)
-SmoothInc.BackgroundColor3 = Color3.fromRGB(40,40,40)
+local SmoothInc = createSmallBtn(0.89,0.85,"+")
 SmoothInc.MouseButton1Click:Connect(function()
-    smoothness = math.min(1.0, math.floor((smoothness + 0.01) * 100)/100)
+    smoothness = math.min(1, math.floor((smoothness + 0.01)*100)/100)
+    SmoothValue.Text = "Smooth: "..smoothness
+end)
+local SmoothDec = createSmallBtn(0.89,0.91,"-")
+SmoothDec.MouseButton1Click:Connect(function()
+    smoothness = math.max(0.01, math.floor((smoothness - 0.01)*100)/100)
     SmoothValue.Text = "Smooth: "..smoothness
 end)
 
--- Botão virtual para mirar (usável em Mobile)
-local AimHoldButton = Instance.new("TextButton", Frame)
+-- Botão AIM (HOLD) touch-friendly
+local AimHoldButton = Instance.new("TextButton")
 AimHoldButton.Size = UDim2.new(0,220,0,30)
-AimHoldButton.Position = UDim2.new(0,10,0,260) -- colocado logo abaixo (pode ficar fora da frame se exceder; vamos ajustar)
--- como Frame tem 260 de altura, posiciono para ficar visível: mover para y = 235
 AimHoldButton.Position = UDim2.new(0,10,0,235)
 AimHoldButton.Text = "AIM (HOLD)"
 AimHoldButton.Font = Enum.Font.Gotham
 AimHoldButton.TextSize = 14
 AimHoldButton.TextColor3 = Color3.fromRGB(255,255,255)
 AimHoldButton.BackgroundColor3 = Color3.fromRGB(40,40,40)
-AimHoldButton.AutoButtonColor = true
+AimHoldButton.Parent = Frame
 
-AimHoldButton.MouseButton1Down:Connect(function()
-    holdingAimButton = true
-end)
-AimHoldButton.MouseButton1Up:Connect(function()
-    holdingAimButton = false
-end)
--- Touch events também (seguro para mobile)
-AimHoldButton.TouchStarted:Connect(function()
-    holdingAimButton = true
-end)
-AimHoldButton.TouchEnded:Connect(function()
-    holdingAimButton = false
-end)
+AimHoldButton.MouseButton1Down:Connect(function() holdingAimButton = true end)
+AimHoldButton.MouseButton1Up:Connect(function() holdingAimButton = false end)
+AimHoldButton.TouchStarted:Connect(function() holdingAimButton = true end)
+AimHoldButton.TouchEnded:Connect(function() holdingAimButton = false end)
 
--- Ajuste para manter frame tamanho original: se botão empurra, deixe visível (não alterei o visual original do menu muito)
--- Caso queira, pode mover o botão para fora do Frame, mas mantive dentro pra não mudar menu drasticamente.
-
--- Controle sliders por mouse (arrastar)
-local draggingFov = false
-local draggingSmooth = false
-
-SliderBack.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then draggingFov = true end
-end)
-SmoothBack.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then draggingSmooth = true end
-end)
-UIS.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-        draggingFov = false
-        draggingSmooth = false
-    end
-end)
-
--- Círculo FOV (UI) - centralizado na tela
-local FOVCircle = Instance.new("Frame", ScreenGui)
+-- FOV circle UI
+local FOVCircle = Instance.new("Frame")
 FOVCircle.Name = "FOVCircle"
-FOVCircle.AnchorPoint = Vector2.new(0.5, 0.5)
-FOVCircle.Position = UDim2.new(0.5, 0, 0.5, 0)
+FOVCircle.AnchorPoint = Vector2.new(0.5,0.5)
+FOVCircle.Position = UDim2.new(0.5,0,0.5,0)
 FOVCircle.Size = UDim2.new(0, fovRadius*2, 0, fovRadius*2)
 FOVCircle.BackgroundTransparency = 1
-FOVCircle.Visible = false
--- UIStroke para borda circular (uisquare com uicorner)
-local FOVCorner = Instance.new("UICorner", FOVCircle)
-FOVCorner.CornerRadius = UDim.new(1, 0) -- torna redondo
-local FOVStroke = Instance.new("UIStroke", FOVCircle)
-FOVStroke.Thickness = 2
-FOVStroke.Transparency = 0
-FOVStroke.Color = Color3.fromRGB(255,0,0)
+FOVCircle.Parent = ScreenGui
 
--- Função para ajustar tamanho do círculo baseado em fovRadius (em pixels)
+local corner = Instance.new("UICorner", FOVCircle)
+corner.CornerRadius = UDim.new(1,0)
+local stroke = Instance.new("UIStroke", FOVCircle)
+stroke.Thickness = 2
+stroke.Color = Color3.fromRGB(255,0,0)
+
 local function updateFOVCircle()
-    local diameter = math.max(6, math.floor(fovRadius * 2))
-    FOVCircle.Size = UDim2.new(0, diameter, 0, diameter)
-    FOVCircle.Position = UDim2.new(0.5, 0, 0.5, 0)
+    local d = math.max(6, math.floor(fovRadius*2))
+    FOVCircle.Size = UDim2.new(0, d, 0, d)
+    FOVCircle.Position = UDim2.new(0.5,0,0.5,0)
 end
 updateFOVCircle()
+FOVCircle.Visible = fovActive
 
--- ESP: usa BillboardGui criado no LocalPlayer.PlayerGui, adornee = HumanoidRootPart
+-- Esp cache
 local espCache = {}
 
 local function createESPFor(plr)
@@ -276,7 +254,7 @@ local function createESPFor(plr)
     bill.AlwaysOnTop = true
     bill.Size = UDim2.new(0,150,0,60)
     bill.StudsOffset = Vector3.new(0,2.5,0)
-    bill.Parent = PlayerGui
+    safeParent(bill, PlayerGui)
 
     local container = Instance.new("Frame", bill)
     container.Size = UDim2.new(1,0,1,0)
@@ -323,144 +301,146 @@ local function removeESP(plr)
     end
 end
 
--- Cria ESPs para jogadores existentes
+-- init esp
 for _,plr in ipairs(Players:GetPlayers()) do
-    if plr ~= LocalPlayer then
-        createESPFor(plr)
-    end
+    if plr ~= LocalPlayer then createESPFor(plr) end
 end
-Players.PlayerAdded:Connect(function(plr)
-    if plr ~= LocalPlayer then
-        task.spawn(function() createESPFor(plr) end)
-    end
-end)
-Players.PlayerRemoving:Connect(function(plr)
-    removeESP(plr)
-end)
+Players.PlayerAdded:Connect(function(plr) if plr ~= LocalPlayer then task.spawn(function() createESPFor(plr) end) end end)
+Players.PlayerRemoving:Connect(removeESP)
 
--- Input botão direito (desktop)
+-- input desktop right click
 UIS.InputBegan:Connect(function(input, gp)
-    if not gp and input.UserInputType == Enum.UserInputType.MouseButton2 then
-        holdingRightClick = true
-    end
+    if not gp and input.UserInputType == Enum.UserInputType.MouseButton2 then holdingRightClick = true end
 end)
 UIS.InputEnded:Connect(function(input, gp)
-    if input.UserInputType == Enum.UserInputType.MouseButton2 then
-        holdingRightClick = false
-    end
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then holdingRightClick = false end
 end)
 
--- Toggle Menu com H (mantive)
+-- toggle menu H
 UIS.InputBegan:Connect(function(input, gp)
     if not gp and input.KeyCode == Enum.KeyCode.H then
         menuVisible = not menuVisible
-        Frame.Visible = menuVisible
+        pcall(function() Frame.Visible = menuVisible end)
     end
 end)
 
--- Função para checar se um ponto de tela está dentro do FOV (pixels)
-local function isInFov(screenX, screenY)
-    local mousePos = UIS:GetMouseLocation()
-    local dx = screenX - mousePos.X
-    local dy = screenY - mousePos.Y
-    local dist = math.sqrt(dx*dx + dy*dy)
-    return dist <= fovRadius
+-- helpers
+local function getMousePos()
+    local ok, res = pcall(function() return UIS:GetMouseLocation() end)
+    if ok and res then
+        return res.X or res.x or res.Position.X, res.Y or res.y or res.Position.Y
+    end
+    -- fallback center
+    local vs = Camera and Camera.ViewportSize or Vector2.new(800,600)
+    return vs.X/2, vs.Y/2
 end
 
--- Encontrar alvo mais próximo em tela dentro do FOV (simples)
 local function getClosestTarget()
-    local closest = nil
-    local closestDist = math.huge
-    local mousePos = UIS:GetMouseLocation()
-
+    local mx, my = getMousePos()
+    local best, bestDist = nil, math.huge
     for _,plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") and plr.Character:FindFirstChildOfClass("Humanoid") then
             local hrp = plr.Character.HumanoidRootPart
             local screenPos, onScreen = Camera:WorldToScreenPoint(hrp.Position)
             if onScreen then
-                local dx = screenPos.X - mousePos.X
-                local dy = screenPos.Y - mousePos.Y
-                local dist = math.sqrt(dx*dx + dy*dy)
-                if dist <= fovRadius and dist < closestDist then
-                    closest = plr
-                    closestDist = dist
+                local dx = screenPos.X - mx
+                local dy = screenPos.Y - my
+                local d = math.sqrt(dx*dx + dy*dy)
+                if d <= fovRadius and d < bestDist then
+                    best = plr
+                    bestDist = d
                 end
             end
         end
     end
-
-    return closest
+    return best
 end
 
--- Atualizações por frame
+-- Render loop com pcall: previne crash total
 RunService.RenderStepped:Connect(function(dt)
-    -- sliders: arrastar com mouse (desktop)
-    if draggingFov then
-        local mouseX = UIS:GetMouseLocation().X
-        local rel = math.clamp((mouseX - SliderBack.AbsolutePosition.X) / SliderBack.AbsoluteSize.X, 0, 1)
-        SliderFill.Size = UDim2.new(rel, 0, 1, 0)
-        fovRadius = math.floor(30 + rel * 970) -- 30 .. 1000
-        FovValue.Text = "FOV: "..fovRadius
-        updateFOVCircle()
-    end
-    if draggingSmooth then
-        local mouseX = UIS:GetMouseLocation().X
-        local rel = math.clamp((mouseX - SmoothBack.AbsolutePosition.X) / SmoothBack.AbsoluteSize.X, 0, 1)
-        SmoothFill.Size = UDim2.new(rel, 0, 1, 0)
-        smoothness = math.floor((0.01 + rel * 0.99) * 100)/100 -- 0.01 .. 1.00
-        SmoothValue.Text = "Smooth: "..smoothness
-    end
-
-    -- Atualiza visibilidade do círculo
-    FOVCircle.Visible = fovActive
-
-    -- Atualiza ESP para cada jogador
-    for plr,widgets in pairs(espCache) do
-        if plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") and plr.Character:FindFirstChildOfClass("Humanoid") then
-            local hrp = plr.Character.HumanoidRootPart
-            widgets.Bill.Adornee = hrp
-            widgets.Name.Text = plr.Name
-            widgets.Name.Visible = espNameActive
-            widgets.Box.Visible = espBoxActive
-            local humanoid = plr.Character:FindFirstChildOfClass("Humanoid")
-            if humanoid and humanoid.Health and humanoid.MaxHealth and espHealthActive then
-                local percent = math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1)
-                widgets.Health.Size = UDim2.new(percent, 0, 0.2, 0)
-                widgets.Health.Visible = true
-            else
-                widgets.Health.Visible = false
+    local ok, err = pcall(function()
+        -- sliders por arraste (desktop)
+        if SliderBack and SliderBack.AbsolutePosition then
+            if UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) and UIS:GetMouseLocation() then
+                -- checa se mouse está sobre a barra (simples)
+                -- dragging detection simplificado: se mouse Y está aproximadamente no slider Y
+                local mx,my = getMousePos()
+                local abs = SliderBack.AbsolutePosition
+                local size = SliderBack.AbsoluteSize
+                if my >= abs.Y and my <= abs.Y + size.Y and mx >= abs.X and mx <= abs.X + size.X then
+                    local rel = math.clamp((mx - abs.X)/size.X, 0, 1)
+                    SliderFill.Size = UDim2.new(rel,0,1,0)
+                    fovRadius = math.floor(30 + rel * 970)
+                    FovValue.Text = "FOV: "..fovRadius
+                    updateFOVCircle()
+                end
             end
-        else
-            widgets.Bill.Adornee = nil
-            widgets.Name.Visible = false
-            widgets.Box.Visible = false
-            widgets.Health.Visible = false
+            if UIS:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) and UIS:GetMouseLocation() then
+                local mx,my = getMousePos()
+                local abs = SmoothBack.AbsolutePosition
+                local size = SmoothBack.AbsoluteSize
+                if my >= abs.Y and my <= abs.Y + size.Y and mx >= abs.X and mx <= abs.X + size.X then
+                    local rel = math.clamp((mx - abs.X)/size.X, 0, 1)
+                    SmoothFill.Size = UDim2.new(rel,0,1,0)
+                    smoothness = math.floor((0.01 + rel*0.99)*100)/100
+                    SmoothValue.Text = "Smooth: "..smoothness
+                end
+            end
         end
-    end
 
-    -- AIM: ativado se aimbotActive e (segurando botão direito no PC OU segurando botão virtual no Mobile)
-    local aiming = aimbotActive and (holdingRightClick or holdingAimButton)
-    if aiming then
-        local targetPlayer = getClosestTarget()
-        if targetPlayer and targetPlayer.Character and targetPlayer.Character:FindFirstChild("HumanoidRootPart") then
-            local hrp = targetPlayer.Character.HumanoidRootPart
-            local camC = Camera.CFrame
-            local lookCF = CFrame.new(camC.Position, hrp.Position)
-            Camera.CFrame = camC:lerp(lookCF, math.clamp(smoothness, 0.01, 1))
+        -- atualiza círculo
+        FOVCircle.Visible = fovActive
+        updateFOVCircle()
+
+        -- atualiza ESP
+        for plr, widget in pairs(espCache) do
+            local okChar = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") and plr.Character:FindFirstChildOfClass("Humanoid")
+            if okChar then
+                widget.Bill.Adornee = plr.Character.HumanoidRootPart
+                widget.Name.Text = plr.Name
+                widget.Name.Visible = espNameActive
+                widget.Box.Visible = espBoxActive
+                local humanoid = plr.Character:FindFirstChildOfClass("Humanoid")
+                if humanoid and humanoid.Health and humanoid.MaxHealth and espHealthActive then
+                    local percent = math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1)
+                    widget.Health.Size = UDim2.new(percent, 0, 0.2, 0)
+                    widget.Health.Visible = true
+                else
+                    widget.Health.Visible = false
+                end
+            else
+                widget.Bill.Adornee = nil
+                widget.Name.Visible = false
+                widget.Box.Visible = false
+                widget.Health.Visible = false
+            end
         end
+
+        -- AIM logic
+        local aiming = aimbotActive and (holdingRightClick or holdingAimButton)
+        if aiming then
+            local target = getClosestTarget()
+            if target and target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
+                local hrp = target.Character.HumanoidRootPart
+                local cam = Camera and Camera.CFrame
+                if cam then
+                    local look = CFrame.new(cam.Position, hrp.Position)
+                    Camera.CFrame = cam:lerp(look, math.clamp(smoothness, 0.01, 1))
+                end
+            end
+        end
+    end)
+    if not ok and debugMode then
+        warn("RenderStepped pcall erro:", err)
     end
 end)
 
--- Garante que espCache entries tenham propriedades corretas (se foram criadas antes)
--- Ajuste: se espCache foi criado sem bill, conserta (compatibilidade)
-for plr, entry in pairs(espCache) do
-    if entry and entry.Bill and entry.Name and entry.Box and entry.Health then
-        -- ok
-    else
+-- Garantir que espCache esteja ok (recria se corrompido)
+for plr,_ in pairs(espCache) do
+    if not (espCache[plr] and espCache[plr].Bill) then
         removeESP(plr)
         createESPFor(plr)
     end
 end
 
--- Inicial print
-print("JEFIN Menu universal carregado — ESP (BillboardGui), FOV circle (UI) e Aimbot com controles Mobile prontos.")
+print("JEFIN universal carregado (tente usar o botão AIM e os + / - do menu).")
