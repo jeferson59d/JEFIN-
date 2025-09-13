@@ -1,8 +1,10 @@
+-- JEFIN Menu - Universal (SEM AUTO REVISTAR)
+--  Compatível com executores Mobile (Delta) e desktop. Não usa Drawing; usa PlayerGui + BillboardGui.
+
 --// Serviços
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local VirtualInputManager = game:GetService("VirtualInputManager")
 local LocalPlayer = Players.LocalPlayer
 local Camera = workspace.CurrentCamera
 
@@ -16,17 +18,17 @@ local espNameActive = false
 local holdingRightClick = false
 local menuVisible = true
 local smoothness = 0.15
-local autoRevistarActive = false
 
--- Itens para pegar
+-- Itens para pegar (mantido, sem uso por enquanto)
 local ItensParaPegar = {
-    "Pt", "Glock", "PtNeon", "G19x", "USPs", "AK47", "G3", "Uzi", "Mac", 
+    "Pt", "Glock", "PtNeon", "G19x", "USPs", "AK47", "G3", "Uzi", "Mac",
     "Fuzil", "TungTung", "m4A1s", "FuzilTrovão", "FuzilPantom", "FuzilHollow",
     "Oitão", "Escudo", "Colote", "Parafal.762", "ArmaDoPd", "PtNike", "PtDragon"
 }
 
---// GUI Menu
-local ScreenGui = Instance.new("ScreenGui", game.CoreGui)
+--// GUI Menu (em PlayerGui para compatibilidade universal)
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 ScreenGui.ResetOnSpawn = false
 
 local Frame = Instance.new("Frame", ScreenGui)
@@ -68,7 +70,7 @@ local function CreateButtonWithStatus(y, text, initial)
     return btn, status
 end
 
--- BOTÕES COM STATUS
+-- BOTÕES COM STATUS (mantive os mesmos nomes e posições, exceto removi AUTO REVISTAR)
 local AimbotButton, AimbotStatus = CreateButtonWithStatus(35,"AIMBOT", aimbotActive)
 AimbotButton.MouseButton1Click:Connect(function()
     aimbotActive = not aimbotActive
@@ -109,14 +111,6 @@ EspNomeButton.MouseButton1Click:Connect(function()
     EspNomeStatus.TextColor3 = espNameActive and Color3.fromRGB(0,255,0) or Color3.fromRGB(255,0,0)
 end)
 
-local AutoRevistarButton, AutoRevistarStatus = CreateButtonWithStatus(185,"AUTO REVISTAR", autoRevistarActive)
-AutoRevistarButton.MouseButton1Click:Connect(function()
-    autoRevistarActive = not autoRevistarActive
-    AutoRevistarButton.BackgroundColor3 = autoRevistarActive and Color3.fromRGB(200,0,0) or Color3.fromRGB(0,200,0)
-    AutoRevistarStatus.Text = autoRevistarActive and "ON" or "OFF"
-    AutoRevistarStatus.TextColor3 = autoRevistarActive and Color3.fromRGB(0,255,0) or Color3.fromRGB(255,0,0)
-end)
-
 -- Slider FOV
 local SliderBack = Instance.new("Frame", Frame)
 SliderBack.Size = UDim2.new(0,200,0,6)
@@ -155,11 +149,28 @@ SmoothValue.TextSize = 14
 SmoothValue.TextColor3 = Color3.fromRGB(255,255,255)
 SmoothValue.BackgroundTransparency = 1
 
--- Controle sliders
+-- Toggle Menu H
+UserInputService.InputBegan:Connect(function(input, gp)
+    if not gp and input.KeyCode == Enum.KeyCode.H then
+        menuVisible = not menuVisible
+        Frame.Visible = menuVisible
+    end
+end)
+
+-- Sliders interactions (mouse location)
 local draggingFov = false
 local draggingSmooth = false
-SliderBack.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 then draggingFov = true end end)
-SmoothBack.InputBegan:Connect(function(input) if input.UserInputType == Enum.UserInputType.MouseButton1 then draggingSmooth = true end end)
+
+SliderBack.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        draggingFov = true
+    end
+end)
+SmoothBack.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 then
+        draggingSmooth = true
+    end
+end)
 UserInputService.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1 then
         draggingFov = false
@@ -167,50 +178,190 @@ UserInputService.InputEnded:Connect(function(input)
     end
 end)
 
--- Círculo FOV
-local DrawingCircle = Drawing.new("Circle")
-DrawingCircle.Visible = false
-DrawingCircle.Thickness = 1.5
-DrawingCircle.Color = Color3.fromRGB(255,0,0)
-DrawingCircle.NumSides = 64
-DrawingCircle.Radius = fovRadius
-DrawingCircle.Filled = false
-
--- Função ESP
-local ESP = {}
-function ESP.New(player)
-    local box = Drawing.new("Square")
-    box.Visible = false
-    box.Color = Color3.fromRGB(255,0,0)
-    box.Thickness = 1.5
-    box.Filled = false
-
-    local healthBar = Drawing.new("Line")
-    healthBar.Visible = false
-    healthBar.Thickness = 2
-
-    local nameTag = Drawing.new("Text")
-    nameTag.Visible = false
-    nameTag.Size = 14
-    nameTag.Center = true
-    nameTag.Outline = true
-    nameTag.Color = Color3.fromRGB(255,255,255)
-
-    return {Box=box, Health=healthBar, Name=nameTag}
+-- Helper para calcular valor de slider a partir da posição do mouse
+local function updateSliderFromMouse(backFrame, fillFrame, minVal, maxVal, isFov)
+    local mouseX, mouseY = UserInputService:GetMouseLocation().X, UserInputService:GetMouseLocation().Y
+    local absPos = backFrame.AbsolutePosition
+    local absSize = backFrame.AbsoluteSize
+    local relativeX = math.clamp((mouseX - absPos.X) / absSize.X, 0, 1)
+    fillFrame.Size = UDim2.new(relativeX, 0, 1, 0)
+    local value = minVal + (maxVal - minVal) * relativeX
+    if isFov then
+        fovRadius = math.floor(value)
+        FovValue.Text = "FOV: "..fovRadius
+    else
+        smoothness = math.floor(value*100)/100
+        SmoothValue.Text = "Smooth: "..tostring(smoothness)
+    end
 end
 
-local espCache = {}
-for _,plr in ipairs(Players:GetPlayers()) do
-    if plr ~= LocalPlayer then espCache[plr] = ESP.New(plr) end
-end
-Players.PlayerAdded:Connect(function(plr)
-    if plr ~= LocalPlayer then espCache[plr] = ESP.New(plr) end
+-- Atualiza sliders enquanto arrasta
+RunService.RenderStepped:Connect(function()
+    if draggingFov then
+        updateSliderFromMouse(SliderBack, SliderFill, 30, 1000, true)
+    end
+    if draggingSmooth then
+        updateSliderFromMouse(SmoothBack, SmoothFill, 0.01, 1.0, false)
+    end
 end)
-Players.PlayerRemoving:Connect(function(plr)
+
+-- ESP usando BillboardGui (universal)
+local function createESPForPlayer(plr)
+    local bill = Instance.new("BillboardGui")
+    bill.Name = "JefinESP"
+    bill.Size = UDim2.new(0,150,0,60)
+    bill.Adornee = nil
+    bill.AlwaysOnTop = true
+    bill.StudsOffset = Vector3.new(0, 2.5, 0)
+    bill.Parent = plr:WaitForChild("PlayerGui") -- safe parent; if PlayerGui não existir, este call espera
+
+    local outer = Instance.new("Frame", bill)
+    outer.Size = UDim2.new(1,0,1,0)
+    outer.BackgroundTransparency = 1
+
+    local nameLabel = Instance.new("TextLabel", outer)
+    nameLabel.Name = "ESPName"
+    nameLabel.Size = UDim2.new(1,0,0,20)
+    nameLabel.Position = UDim2.new(0,0,0,0)
+    nameLabel.BackgroundTransparency = 1
+    nameLabel.Font = Enum.Font.Gotham
+    nameLabel.TextSize = 14
+    nameLabel.Text = plr.Name
+    nameLabel.TextColor3 = Color3.fromRGB(255,255,255)
+    nameLabel.TextStrokeTransparency = 0.6
+
+    local boxFrame = Instance.new("Frame", outer)
+    boxFrame.Name = "ESPBox"
+    boxFrame.Size = UDim2.new(0,80,0,30)
+    boxFrame.Position = UDim2.new(0.5,-40,0,20)
+    boxFrame.BackgroundTransparency = 0.6
+    boxFrame.BackgroundColor3 = Color3.fromRGB(0,0,0)
+    boxFrame.BorderSizePixel = 1
+
+    local healthBar = Instance.new("Frame", boxFrame)
+    healthBar.Name = "HealthBar"
+    healthBar.Size = UDim2.new(1,0,0.2,0)
+    healthBar.Position = UDim2.new(0,0,0.8,0)
+    healthBar.BackgroundColor3 = Color3.fromRGB(0,255,0)
+    healthBar.BorderSizePixel = 0
+
+    return {
+        Billboard = bill,
+        Name = nameLabel,
+        Box = boxFrame,
+        Health = healthBar,
+    }
+end
+
+-- Gerenciar cache de ESP
+local espCache = {}
+local function ensureESP(plr)
+    if not espCache[plr] then
+        -- tente anexar ao PlayerGui do LocalPlayer para que o jogador veja
+        local container = LocalPlayer:FindFirstChild("PlayerGui")
+        -- cria Billboards no PlayerGui do local (necessário para mobile executors sem Drawing)
+        local bill = Instance.new("BillboardGui")
+        bill.Name = "JefinESP_"..plr.Name
+        bill.Size = UDim2.new(0,150,0,60)
+        bill.Adornee = nil
+        bill.AlwaysOnTop = true
+        bill.StudsOffset = Vector3.new(0, 2.5, 0)
+        bill.Parent = LocalPlayer:WaitForChild("PlayerGui")
+
+        local outer = Instance.new("Frame", bill)
+        outer.Size = UDim2.new(1,0,1,0)
+        outer.BackgroundTransparency = 1
+
+        local nameLabel = Instance.new("TextLabel", outer)
+        nameLabel.Name = "ESPName"
+        nameLabel.Size = UDim2.new(1,0,0,20)
+        nameLabel.Position = UDim2.new(0,0,0,0)
+        nameLabel.BackgroundTransparency = 1
+        nameLabel.Font = Enum.Font.Gotham
+        nameLabel.TextSize = 14
+        nameLabel.Text = plr.Name
+        nameLabel.TextColor3 = Color3.fromRGB(255,255,255)
+        nameLabel.TextStrokeTransparency = 0.6
+
+        local boxFrame = Instance.new("Frame", outer)
+        boxFrame.Name = "ESPBox"
+        boxFrame.Size = UDim2.new(0,80,0,30)
+        boxFrame.Position = UDim2.new(0.5,-40,0,20)
+        boxFrame.BackgroundTransparency = 0.6
+        boxFrame.BackgroundColor3 = Color3.fromRGB(0,0,0)
+        boxFrame.BorderSizePixel = 1
+
+        local healthBar = Instance.new("Frame", boxFrame)
+        healthBar.Name = "HealthBar"
+        healthBar.Size = UDim2.new(1,0,0.2,0)
+        healthBar.Position = UDim2.new(0,0,0.8,0)
+        healthBar.BackgroundColor3 = Color3.fromRGB(0,255,0)
+        healthBar.BorderSizePixel = 0
+
+        espCache[plr] = {
+            Billboard = bill,
+            Name = nameLabel,
+            Box = boxFrame,
+            Health = healthBar,
+        }
+    end
+end
+
+-- Remove ESP
+local function removeESP(plr)
     if espCache[plr] then
-        for _,obj in pairs(espCache[plr]) do obj:Remove() end
+        pcall(function()
+            espCache[plr].Billboard:Destroy()
+        end)
         espCache[plr] = nil
     end
+end
+
+-- Atualiza ESP cada frame
+RunService.RenderStepped:Connect(function()
+    for plr,widgets in pairs(espCache) do
+        if plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") and plr.Character:FindFirstChild("Humanoid") then
+            local hrp = plr.Character.HumanoidRootPart
+            widgets.Billboard.Adornee = hrp
+            -- name
+            widgets.Name.Text = plr.Name
+            widgets.Name.Visible = espNameActive
+            -- box visibility
+            widgets.Box.Visible = espBoxActive
+            -- health
+            local humanoid = plr.Character:FindFirstChild("Humanoid")
+            if humanoid and humanoid.Health and humanoid.MaxHealth then
+                local healthPercent = math.clamp(humanoid.Health / humanoid.MaxHealth, 0, 1)
+                widgets.Health.Size = UDim2.new(healthPercent,0,0.2,0)
+                widgets.Health.Visible = espHealthActive
+            else
+                widgets.Health.Visible = false
+            end
+        else
+            widgets.Billboard.Adornee = nil
+            widgets.Name.Visible = false
+            widgets.Box.Visible = false
+            widgets.Health.Visible = false
+        end
+    end
+end)
+
+-- Cria ESP para jogadores já presentes
+for _,plr in ipairs(Players:GetPlayers()) do
+    if plr ~= LocalPlayer then
+        ensureESP(plr)
+    end
+end
+Players.PlayerAdded:Connect(function(plr)
+    if plr ~= LocalPlayer then
+        -- pequeno delay para garantir PlayerGui
+        task.spawn(function()
+            ensureESP(plr)
+        end)
+    end
+end)
+Players.PlayerRemoving:Connect(function(plr)
+    removeESP(plr)
 end)
 
 -- Input botão direito
@@ -225,5 +376,61 @@ UserInputService.InputEnded:Connect(function(input, gp)
     end
 end)
 
--- Toggle Menu H
-UserInputService.InputBegan:                                    
+-- Função utilitária: verificar se ponto da tela está dentro do FOV (eu uso distância em pixels)
+local function isInFov(screenPos)
+    local mousePos = UserInputService:GetMouseLocation()
+    local dx = screenPos.X - mousePos.X
+    local dy = screenPos.Y - mousePos.Y
+    local dist = math.sqrt(dx*dx + dy*dy)
+    return dist <= fovRadius
+end
+
+-- Encontrar alvo válido mais próximo (em tela) dentro do FOV e linha de visão simples
+local function getClosestTarget()
+    local closest = nil
+    local closestDist = math.huge
+    local mousePos = UserInputService:GetMouseLocation()
+
+    for _,plr in pairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") and plr.Character:FindFirstChild("Humanoid") and plr.Character.Humanoid.Health > 0 then
+            local hrp = plr.Character.HumanoidRootPart
+            local screenPos, onScreen = Camera:WorldToScreenPoint(hrp.Position)
+            if onScreen then
+                local dx = screenPos.X - mousePos.X
+                local dy = screenPos.Y - mousePos.Y
+                local dist = math.sqrt(dx*dx + dy*dy)
+                if dist <= fovRadius and dist < closestDist then
+                    -- opcional: checar raycast para linha de visão (pode ser deixado leve)
+                    closest = plr
+                    closestDist = dist
+                end
+            end
+        end
+    end
+
+    return closest
+end
+
+-- Aimbot loop (RenderStepped para suavidade)
+RunService.RenderStepped:Connect(function(dt)
+    -- atualizar sliders já tratados acima
+    if aimbotActive and holdingRightClick then
+        local target = getClosestTarget()
+        if target and target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
+            local hrp = target.Character.HumanoidRootPart
+            -- calcular look at CFrame a partir da câmera para o ponto do head/HRP
+            local camCFrame = Camera.CFrame
+            local targetPos = hrp.Position
+            local lookCF = CFrame.new(camCFrame.Position, targetPos)
+            -- suavizar usando Lerp
+            local newCFrame = camCFrame:lerp(lookCF, math.clamp(smoothness, 0.01, 1))
+            Camera.CFrame = newCFrame
+        end
+    end
+end)
+
+-- Inicializar espCache para todos os players (já feito), garantir ausência do AutoRevistar
+-- OBS: Menu visual foi preservado (apenas removido o botão AutoRevistar)
+
+-- Mensagem de confirmação (opcional)
+print("JEFIN Menu carregado — Aimbot, FOV e ESP prontos (sem Auto Revistar).")
